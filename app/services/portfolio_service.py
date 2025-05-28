@@ -5,7 +5,7 @@ from app.services.data_fetcher import fetch_price
 from app.core.logger import logger
 
 
-def calculate_portfolio_value(assets: List[PortfolioAsset]) -> Dict[str, Any]:
+async def calculate_portfolio_value(assets: List[PortfolioAsset]) -> Dict[str, Any]:
     """
     Compute current value of each asset and total portfolio.
     Returns {'assets': [{'symbol', 'amount', 'value_usd'}], 'total_value'}
@@ -26,7 +26,7 @@ def calculate_portfolio_value(assets: List[PortfolioAsset]) -> Dict[str, Any]:
     return {'assets': results, 'total_value': total}
 
 
-def suggest_rebalance(current: Dict[str, float], target: Dict[str, float]) -> Dict[str, float]:
+async def suggest_rebalance(current: Dict[str, float], target: Dict[str, float]) -> Dict[str, float]:
     """
     Suggest adjustments: target and current are symbol->weight (0..1).
     Returns diff: positive means buy %, negative means sell %.
