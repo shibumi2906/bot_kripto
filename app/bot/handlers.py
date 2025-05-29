@@ -1,75 +1,119 @@
 # File: app/bot/handlers.py
-from aiogram import Router, types
+
+from aiogram import Dispatcher, types
 from aiogram.filters import Command
-from app.services.signal_generator import generate_signal
-from app.services.portfolio_service import calculate_portfolio_value
-# from app.services.onchain_service import fetch_onchain_metrics  # implement when ready
-from app.core.logger import logger
+from app.core.db import query
+from app.core.config import settings
 
-router = Router()
+def register_handlers(dp: Dispatcher) -> None:
+    dp.message.register(cmd_start,       Command(commands=["start"]))
+    dp.message.register(cmd_help,        Command(commands=["help"]))
+    dp.message.register(cmd_signals,     Command(commands=["signals"]))
+    dp.message.register(cmd_history,     Command(commands=["history"]))
+    dp.message.register(cmd_portfolio,   Command(commands=["portfolio"]))
+    dp.message.register(cmd_onchain,     Command(commands=["onchain"]))
+    dp.message.register(cmd_subscribe,   Command(commands=["subscribe"]))
 
-@router.message(Command("start"))
+
 async def cmd_start(message: types.Message):
-    """Welcome message and available commands."""
-    text = (
+    await message.answer(
         "👋 Привет! Я Crypto Signals Bot. Доступные команды:\n"
-        "/signals - получить торговый сигнал\n"
-        "/portfolio - текущее состояние портфеля\n"
-        "/onchain - on-chain метрики\n"
-        "/subscribe - оформить подписку\n"
-        "/help - показать это сообщение"
+        "/signals   — получить торговый сигнал\n"
+        "/portfolio — текущее состояние портфеля\n"
+        "/onchain   — on-chain метрики (по активу)\n"
+        "/subscribe — оформить подписку\n"
+        "/help      — показать это сообщение"
     )
-    await message.answer(text)
 
-@router.message(Command("help"))
 async def cmd_help(message: types.Message):
+    # просто дублируем /start
     await cmd_start(message)
 
-@router.message(Command("signals"))
+
 async def cmd_signals(message: types.Message):
-    """Generate and send a trading signal."""
-    await message.answer("🔄 Генерирую сигнал...")
-    try:
-        signal = await generate_signal()
-        text = (
-            f"🎯 Сигнал: {signal['action']}\n"
-            f"Entry: {signal['entry']}\n"
-            f"Target: {signal['target']}\n"
-            f"Stop-loss: {signal['stop_loss']}\n"
-            f"Confidence: {signal['confidence']:.2f}"
+    rows = query(
+        "SELECT asset, signal_type, entry, target, stop_loss, confidence, explanation, created_at "
+        "FROM signals ORDER BY created_at DESC LIMIT ?",
+        (5,),
+    )
+    if not rows:
+        await message.answer("Пока нет сигналов.")
+        return
+    parts = []
+    for asset, action, entry, target, stop_loss, conf, expl, created in rows:
+        parts.append(
+            f"<b>{asset}</b> — {action.upper()} @ {entry}\n"
+            f"TP: {target}, SL: {stop_loss}\n"
+            f"Conf: {conf*100:.1f}%\n"
+            f"{expl}\n"
+            f"<i>{created}</i>"
         )
-    except Exception as e:
-        logger.error(f"Error generating signal: {e}")
-        text = "❗️ Не удалось сгенерировать сигнал. Попробуйте позже."
-    await message.answer(text)
+    await message.answer("\n\n".join(parts), parse_mode="HTML")
 
-@router.message(Command("portfolio"))
+
+async def cmd_history(message: types.Message):
+    rows = query(
+        "SELECT asset, signal_type, entry, target, stop_loss, confidence, created_at "
+        "FROM signals ORDER BY created_at DESC LIMIT ?",
+        (10,),
+    )
+    if not rows:
+        await message.answer("История сигналов пуста.")
+        return
+    lines = [f"{r[7]} | {r[0]} {r[1].upper()} @ {r[2]} (TP {r[3]}, SL {r[4]})" for r in rows]
+    await message.answer("📜 История сигналов:\n" + "\n".join(lines))
+
+
 async def cmd_portfolio(message: types.Message):
-    """Compute and send portfolio value."""
-    # TODO: replace stub with user-specific assets
-    assets = []  # example: [{'symbol': 'BTC', 'amount': 0.5}]
-    try:
-        result = calculate_portfolio_value(assets)
-        lines = [f"{a['symbol']}: {a['amount']} ({a['value_usd']:.2f} USD)" for a in result['assets']]
-        lines.append(f"💰 Общая стоимость: {result['total_value']:.2f} USD")
-        text = "\n".join(lines) if lines else "Портфель пуст или не найдено активов."
-    except Exception as e:
-        logger.error(f"Error calculating portfolio: {e}")
-        text = "❗️ Не удалось получить состояние портфеля."
-    await message.answer(text)
+    user_id = message.from_user.id
+    rows = query("SELECT asset, amount FROM portfolio WHERE telegram_id = ?", (user_id,))
+    if not rows:
+        await message.answer("Ваш портфель пуст.")
+        return
+    lines = [f"{asset}: {amount}" for asset, amount in rows]
+    await message.answer("💼 Ваш портфель:\n" + "\n".join(lines))
 
-@router.message(Command("onchain"))
+
 async def cmd_onchain(message: types.Message):
-    """Fetch and send on-chain metrics."""
-    await message.answer("🔄 Получаю on-chain метрики...")
-    try:
-        from app.services.onchain_service import fetch_onchain_metrics
-        metrics = await fetch_onchain_metrics()
-        text = (
-            f"🏦 Активные адреса: {metrics.active_addresses}\n"
-            f"📊 Кол-во транзакций: {metrics.tx_count}"
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        # Экранируем угловые скобки, чтобы HTML-парсер не ругался
+        await message.answer(
+            "Использование: /onchain &lt;symbol&gt;\n"
+            "Пример: /onchain BTC",
+            parse_mode="HTML"
         )
-    except Exception as e:
-        logger.error(f"Error fetching onchain metrics: {e}")
-        text = "❗️ Не удалось получить on-chain метрики."
-    await message.answer(text)
+        return
+
+    symbol = parts[1].upper()
+    rows = query(
+        "SELECT active_addresses, tx_volume FROM onchain_metrics "
+        "WHERE asset = ? ORDER BY timestamp DESC LIMIT 1",
+        (symbol,),
+    )
+    if not rows:
+        await message.answer(f"Нет on-chain метрик для {symbol}.")
+        return
+
+    active, volume = rows[0]
+    await message.answer(
+        f"📊 On-chain метрики для <b>{symbol}</b>:\n"
+        f"Активных адресов: {active}\n"
+        f"Объем tx (посл.): {volume}",
+        parse_mode="HTML",
+    )
+
+
+
+async def cmd_subscribe(message: types.Message):
+    user_id = message.from_user.id
+    # Формируем ссылку на ваш эндпоинт создания Stripe-сессии
+    link = (
+        f"{settings.API_URL}/payments/create-checkout-session"
+        f"?user_id={user_id}&plan=basic"
+    )
+    await message.answer(
+        f"🔑 Оформить подписку можно по ссылке:\n{link}\n"
+        "(после оплаты вы получите доступ к премиум-сигналам)"
+    )
+

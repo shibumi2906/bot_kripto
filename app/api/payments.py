@@ -1,26 +1,26 @@
 # File: app/api/payments.py
-from fastapi import APIRouter, Request, HTTPException, Depends
+
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 import stripe
 from datetime import datetime, timedelta
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import sqlite3
 
 from app.core.config import settings
 from app.core.logger import logger
-from app.core.db import get_db
-from app.core.models import Subscription
+from app.core.db import execute
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
-# Configure Stripe
+# Настраиваем ключ Stripe
 stripe.api_key = settings.STRIPE_API_KEY
-STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET  # add to config
+STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET  # из config.py
 
 @router.post("/create-checkout-session")
-async def create_checkout_session(user_id: str, plan: str):
-    """Create a Stripe Checkout session for the given user and plan."""
-    # TODO: map plan to Stripe Price ID
+async def create_checkout_session(user_id: int, plan: str):
+    """
+    Создать Stripe Checkout сессию для подписки пользователя.
+    """
     price_id = settings.STRIPE_PRICE_IDS.get(plan)
     if not price_id:
         raise HTTPException(status_code=400, detail="Unknown plan")
@@ -29,9 +29,9 @@ async def create_checkout_session(user_id: str, plan: str):
             payment_method_types=["card"],
             mode="subscription",
             line_items=[{"price": price_id, "quantity": 1}],
-            metadata={"user_id": user_id, "plan": plan},
-            success_url=settings.DOMAIN + "/success?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=settings.DOMAIN + "/cancel"
+            metadata={"user_id": str(user_id), "plan": plan},
+            success_url=f"{settings.DOMAIN}/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.DOMAIN}/cancel",
         )
         return {"sessionId": session.id}
     except Exception as e:
@@ -39,14 +39,15 @@ async def create_checkout_session(user_id: str, plan: str):
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 @router.post("/webhook")
-async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
-    """Handle Stripe webhook events."""
+async def stripe_webhook(request: Request):
+    """
+    Обработчик вебхуков от Stripe.
+    При событии checkout.session.completed обновляем таблицу subscriptions.
+    """
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, STRIPE_WEBHOOK_SECRET
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except ValueError as e:
         logger.error(f"Invalid payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid payload")
@@ -54,25 +55,30 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         logger.error(f"Invalid signature: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Process checkout.session.completed
-    if event['type'] == 'checkout.session.completed':
-        session_obj = event['data']['object']
-        user_id = session_obj['metadata'].get('user_id')
-        # Activate or update subscription
-        expires_at = datetime.utcnow() + timedelta(days=30)  # adjust per plan
-        result = await db.execute(select(Subscription).filter_by(user_id=user_id))
-        subscription = result.scalar_one_or_none()
-        if subscription:
-            subscription.is_active = True
-            subscription.expires_at = expires_at
-        else:
-            subscription = Subscription(
-                user_id=user_id,
-                is_active=True,
-                expires_at=expires_at
+    if event["type"] == "checkout.session.completed":
+        session_obj = event["data"]["object"]
+        user_id = int(session_obj["metadata"]["user_id"])
+        plan = session_obj["metadata"]["plan"]
+        # Считаем срок действия подписки (30 дней от now)
+        expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
+
+        # Вставляем или обновляем запись в subscriptions
+        try:
+            execute(
+                """
+                INSERT INTO subscriptions(
+                    telegram_id, provider, status, started_at, expires_at
+                ) VALUES (?, ?, ?, datetime('now'), ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    provider=excluded.provider,
+                    status=excluded.status,
+                    expires_at=excluded.expires_at;
+                """,
+                (user_id, "stripe", "active", expires_at),
             )
-            db.add(subscription)
-        await db.commit()
-        logger.info(f"Activated subscription for user {user_id}")
+            logger.info(f"Activated subscription for user {user_id} (plan={plan})")
+        except sqlite3.Error as e:
+            logger.error(f"DB error updating subscriptions: {e}")
 
     return JSONResponse(status_code=200, content={"received": True})
+

@@ -1,20 +1,95 @@
 # create_tables.py
 
-import asyncio
-from app.core.db import engine, Base
+import sqlite3
+from app.core.config import settings
 
-# ВАЖНО: без этого импорта Base.metadata будет пустым
-import app.core.models  # noqa: F401
+# Собираем все DDL-запросы в одну строку.
+SCHEMA = """
+-- Таблица пользователей
+CREATE TABLE IF NOT EXISTS users (
+  telegram_id INTEGER PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  is_premium INTEGER DEFAULT 0,
+  premium_expires_at TEXT
+);
 
-async def main():
+-- Таблица подписок
+CREATE TABLE IF NOT EXISTS subscriptions (
+  telegram_id INTEGER PRIMARY KEY,
+  provider TEXT,
+  status TEXT,
+  started_at TEXT,
+  expires_at TEXT
+);
+
+-- Таблица портфеля
+CREATE TABLE IF NOT EXISTS portfolio (
+  telegram_id INTEGER,
+  asset TEXT,
+  amount REAL,
+  PRIMARY KEY (telegram_id, asset)
+);
+
+-- Таблица торговых сигналов
+CREATE TABLE IF NOT EXISTS signals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset TEXT,
+  signal_type TEXT,
+  entry REAL,
+  target REAL,
+  stop_loss REAL,
+  confidence REAL,
+  explanation TEXT,
+  created_at TEXT
+);
+
+-- Таблица сентимента соцсетей/новостей
+CREATE TABLE IF NOT EXISTS social_sentiment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset TEXT,
+  timestamp TEXT,
+  score REAL,
+  mentions INTEGER
+);
+
+-- Таблица on-chain метрик
+CREATE TABLE IF NOT EXISTS onchain_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset TEXT,
+  timestamp TEXT,
+  active_addresses INTEGER,
+  tx_volume REAL
+);
+
+-- Таблица новостей (если понадобится)
+CREATE TABLE IF NOT EXISTS news (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset TEXT,
+  timestamp TEXT,
+  title TEXT,
+  url TEXT,
+  sentiment_score REAL
+);
+"""
+
+
+def init_db(db_path: str = None):
     """
-    Создаёт все таблицы, описанные в моделях (app/core/models.py).
+    Создаёт файл SQLite (по умолчанию settings.DB_PATH)
+    и все таблицы, описанные в SCHEMA.
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
-    print("✅ All tables created successfully")
+    path = db_path or settings.DB_PATH
+    conn = sqlite3.connect(path)
+    try:
+        # Выполняем сразу все команды из SCHEMA
+        conn.executescript(SCHEMA)
+        print(f"✅ Таблицы созданы или уже существуют в {path}")
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    init_db()
+
+
 

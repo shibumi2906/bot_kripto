@@ -1,12 +1,14 @@
 # File: app/services/data_fetcher.py
 import httpx
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from app.core.config import settings
 from app.core.logger import logger
+
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 BINANCE_DEPTH_URL = "https://api.binance.com/api/v3/depth"
 COINCAP_ASSETS_URL = "https://api.coincap.io/v2/assets"
+BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 async def fetch_binance_price(symbol: str = "BTCUSDT") -> float:
     """Fetch current price from Binance public REST API."""
@@ -51,3 +53,36 @@ async def fetch_order_book(symbol: str = "BTCUSDT", limit: int = 50) -> Dict[str
         data = resp.json()
     logger.debug(f"Fetched order book for {symbol}")
     return {"bids": data.get("bids", []), "asks": data.get("asks", [])}
+
+async def fetch_ohlcv(
+    symbol: str = "BTCUSDT",
+    interval: str = "1m",
+    limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Fetch OHLCV bars from Binance.
+
+    :param symbol: торговая пара, e.g. "BTCUSDT"
+    :param interval: таймфрейм, e.g. "1m", "5m", "1h"
+    :param limit: сколько баров вернуть (макс. 1000)
+    :return: список словарей с ключами open_time, open, high, low, close, volume, close_time
+    """
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(BINANCE_KLINES_URL, params=params)
+        resp.raise_for_status()
+        raw = resp.json()
+
+    ohlcv = []
+    for item in raw:
+        ohlcv.append({
+            "open_time":   item[0],
+            "open":       float(item[1]),
+            "high":       float(item[2]),
+            "low":        float(item[3]),
+            "close":      float(item[4]),
+            "volume":     float(item[5]),
+            "close_time": item[6],
+        })
+    logger.debug(f"Fetched {len(ohlcv)} OHLCV bars for {symbol} @{interval}")
+    return ohlcv

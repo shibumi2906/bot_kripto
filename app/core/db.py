@@ -1,32 +1,31 @@
-# File: app/core/db.py
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
+# app/core/db.py
+import sqlite3
+from typing import Any, List, Tuple
+
 from app.core.config import settings
-from app.core.logger import logger
 
-# Async engine and session
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    future=True,
-    echo=False
-)
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+DB_PATH = settings.DB_PATH
 
-# Base declarative class
-Base = declarative_base()
 
-# Dependency for FastAPI routes
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            logger.error("Database session rollback due to exception")
-            raise
-        finally:
-            await session.close()
+def query(sql: str, params: Tuple[Any, ...] = ()) -> List[Tuple[Any, ...]]:
+    """
+    Выполнить SELECT-запрос и вернуть все строки.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(sql, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def execute(sql: str, params: Tuple[Any, ...] = ()) -> None:
+    """
+    Выполнить INSERT/UPDATE/DELETE-запрос.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(sql, params)
+    conn.commit()
+    conn.close()
+

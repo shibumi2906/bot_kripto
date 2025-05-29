@@ -1,28 +1,41 @@
 # File: app/core/schemas.py
+
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, List
 
+# ----------------------------
 # User schemas
-type Engine = Optional[str]
+# ----------------------------
+
 class UserCreate(BaseModel):
     username: str
 
+
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     username: str
-    class Config:
-        orm_mode = True
 
+
+# ----------------------------
 # Subscription schemas
+# ----------------------------
+
 class SubscriptionStatus(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     is_active: bool
     expires_at: Optional[datetime]
-    class Config:
-        orm_mode = True
 
+
+# ----------------------------
 # Signal schema
+# ----------------------------
+
 class Signal(BaseModel):
     action: str
     entry: float
@@ -30,20 +43,27 @@ class Signal(BaseModel):
     stop_loss: float
     confidence: float
 
+
+# ----------------------------
 # Portfolio schemas
+# ----------------------------
+
 class PortfolioAsset(BaseModel):
     symbol: str
     amount: float
     value_usd: float
 
+
 class PortfolioOut(BaseModel):
     assets: List[PortfolioAsset]
     total_value: float
 
+
+# ----------------------------
 # On-chain metrics schema
+# ----------------------------
+
 class OnChainMetricsOut(BaseModel):
     active_addresses: int
     tx_count: int
 
-class Config:
-    orm_mode = True

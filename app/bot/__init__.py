@@ -1,27 +1,33 @@
 # File: app/bot/__init__.py
-import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.client.bot import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
+
+from aiogram.client.bot import Bot, DefaultBotProperties
+from aiogram import Dispatcher
+from aiogram.types import BotCommand
 
 from app.core.config import settings
-from app.bot.handlers import router as bot_router
-from app.bot.middlewares import SubscriptionMiddleware
+from app.bot.handlers import register_handlers
 
-# Исправленный конструктор без parse_mode в сигнатуре
+# 1) Создаём Bot, указывая parse_mode через DefaultBotProperties
 bot = Bot(
     token=settings.TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML")
 )
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
 
-# Регистрируем middleware и router
-dp.update.middleware.register(SubscriptionMiddleware())
-dp.include_router(bot_router)
+# 2) Создаём Dispatcher и регистрируем в нём хендлеры
+dp = Dispatcher()
+register_handlers(dp)
 
 async def start_bot():
-    """Start polling the Telegram bot."""
-    await dp.start_polling(bot)
+    """
+    Запускает бота: устанавливает команды и стартует поллинг.
+    """
+    # Устанавливаем команды для пользователя
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="signals", description="Получить сигналы"),
+        BotCommand(command="portfolio", description="Показать портфель"),
+    ])
+    # Запуск polling
+    await dp.start_polling(bot, skip_updates=True)
 
 
