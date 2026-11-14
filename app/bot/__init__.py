@@ -1,22 +1,32 @@
-# File: app/bot/__init__.py
-import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from app.core.config import settings
+
 from app.bot.handlers import router as bot_router
-from app.bot.middlewares import SubscriptionMiddleware
+from app.core.config import settings
 
-# Initialize bot and dispatcher
-bot = Bot(token=settings.TELEGRAM_BOT_TOKEN, parse_mode="HTML")
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
 
-# Register middleware and router
-dp.update.middleware.register(SubscriptionMiddleware())
-dp.include_router(bot_router)
+def create_bot() -> Bot:
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+
+    return Bot(
+        token=settings.TELEGRAM_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+
+def create_dispatcher() -> Dispatcher:
+    dispatcher = Dispatcher(storage=MemoryStorage())
+    dispatcher.include_router(bot_router)
+    return dispatcher
+
 
 async def start_bot():
-    """Start polling the Telegram bot."""
-    await dp.start_polling(bot)
-
-# Optionally, you can call asyncio.create_task(start_bot()) in FastAPI on_startup
+    bot = create_bot()
+    dispatcher = create_dispatcher()
+    try:
+        await dispatcher.start_polling(bot)
+    finally:
+        await bot.session.close()

@@ -1,23 +1,19 @@
-# File: app/main.py
 from fastapi import FastAPI
-from app.api import users, signals, portfolio, analytics
+
+from app.api.analysis import router
 
 app = FastAPI(
-    title="Crypto Signals Bot API",
-    version="0.1.0",
+    title="Crypto Analyst: Deterministic Core + AI",
+    version="0.3.0",
+    description=(
+        "Reproducible technical analysis from closed hourly candles. "
+        "Demo runs offline. Live uses Binance, OKX and Kraken. "
+        "AI commentary is optional and cannot modify the core report."
+    ),
 )
+app.include_router(router)
 
-# include routers
-app.include_router(users.router)
-app.include_router(signals.router)
-app.include_router(portfolio.router)
-app.include_router(analytics.router)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-    )
+@app.get("/health")
+async def healthcheck():
+    return {"status": "ok", "engine": "technical-v2"}

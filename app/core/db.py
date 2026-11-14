@@ -1,25 +1,22 @@
 # File: app/core/db.py
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
+
 from app.core.config import settings
 from app.core.logger import logger
 
-# Async engine and session
 engine = create_async_engine(
     settings.DATABASE_URL,
     future=True,
-    echo=False
+    echo=False,
 )
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-# Base declarative class
-Base = declarative_base()
 
-# Dependency for FastAPI routes
+class Base(DeclarativeBase):
+    pass
+
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         try:
@@ -30,3 +27,8 @@ async def get_db():
             raise
         finally:
             await session.close()
+
+
+async def init_db() -> None:
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)

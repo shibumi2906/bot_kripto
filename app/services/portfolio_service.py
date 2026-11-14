@@ -1,39 +1,40 @@
-# File: app/services/portfolio_service.py
-from typing import List, Dict, Any
+from typing import Any
+
+from app.core.logger import logger
 from app.core.schemas import PortfolioAsset
 from app.services.data_fetcher import fetch_price
-from app.core.logger import logger
 
 
-def calculate_portfolio_value(assets: List[PortfolioAsset]) -> Dict[str, Any]:
-    """
-    Compute current value of each asset and total portfolio.
-    Returns {'assets': [{'symbol', 'amount', 'value_usd'}], 'total_value'}
-    """
+async def calculate_portfolio_value(assets: list[PortfolioAsset]) -> dict[str, Any]:
     results = []
     total = 0.0
+
     for asset in assets:
-        price = None
         try:
-            price = await fetch_price(asset.symbol + 'USDT')
-        except Exception:
-            logger.warning(f"Failed to fetch price for {asset.symbol}")
-            continue
+            price = await fetch_price(f"{asset.symbol.upper()}USDT")
+        except Exception as exc:
+            logger.warning(f"Failed to fetch price for {asset.symbol}: {exc}")
+            price = 0.0
+
         value = asset.amount * price
-        results.append({'symbol': asset.symbol, 'amount': asset.amount, 'value_usd': value})
+        results.append(
+            {
+                "symbol": asset.symbol.upper(),
+                "amount": asset.amount,
+                "value_usd": value,
+            }
+        )
         total += value
+
     logger.info(f"Calculated portfolio value: {total}")
-    return {'assets': results, 'total_value': total}
+    return {"assets": results, "total_value": total}
 
 
-def suggest_rebalance(current: Dict[str, float], target: Dict[str, float]) -> Dict[str, float]:
-    """
-    Suggest adjustments: target and current are symbol->weight (0..1).
-    Returns diff: positive means buy %, negative means sell %.
-    """
+def suggest_rebalance(current: dict[str, float], target: dict[str, float]) -> dict[str, float]:
     diffs = {}
-    for symbol, tgt in target.items():
-        cur = current.get(symbol, 0)
-        diffs[symbol] = tgt - cur
+    for symbol, target_weight in target.items():
+        current_weight = current.get(symbol, 0.0)
+        diffs[symbol] = target_weight - current_weight
+
     logger.debug(f"Rebalance suggestions: {diffs}")
     return diffs
